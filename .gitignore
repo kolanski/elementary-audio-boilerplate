@@ -129,6 +129,8 @@ bower_components
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
+build/build
+build/juce
 
 # Dependency directories
 node_modules/
@@ -357,7 +359,7 @@ fabric.properties
 
 ### Windows ###
 # Windows thumbnail cache files
-Thumbs.db
+Thumbs.dbhttps://github.com/Tracktion/choc/commit/5502ff4?diff=unified&w=1
 Thumbs.db:encryptable
 ehthumbs.db
 ehthumbs_vista.db
