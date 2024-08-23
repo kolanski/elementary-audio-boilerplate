@@ -1,7 +1,7 @@
 #include "PluginProcessor.h"
 
 #include <choc_javascript_QuickJS.h>
-
+#include "CustomPlugin"
 
 //==============================================================================
 // A quick helper for locating bundled asset files
