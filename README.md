@@ -12,3 +12,6 @@ If you are a web developer who has ever wanted to create an audio plug-in for Lo
 * [Elementary.Audio](https://www.elementary.audio/)
 
 
+
+cd ./build
+cmake --build .
