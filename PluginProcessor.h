@@ -16,9 +16,16 @@ class EffectsPluginProcessor
 public:
     //==============================================================================
     EffectsPluginProcessor();
+    
     ~EffectsPluginProcessor() override;
 
     //==============================================================================
+    void startRecording();
+    void stopRecording();
+    void startPlayback();
+    void stopPlayback();
+    void setVolume(float newVolume);
+    void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override;
     juce::AudioProcessorEditor* createEditor() override;
     void handleWebViewMessage(const std::string &message);
     choc::javascript::Context jsContext;
@@ -32,7 +39,7 @@ public:
 
     bool isBusesLayoutSupported (const juce::AudioProcessor::BusesLayout& layouts) const override;
 
-    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    //void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     //==============================================================================
     const juce::String getName() const override;
@@ -72,6 +79,11 @@ private:
     // A. THis is where we hld the state of or audio processor
     // Ableton line wants to know
     elem::js::Object state;
+    bool isRecording = false;
+    bool isPlaying = false;
+    juce::AudioBuffer<float> recordedBuffer;
+    juce::AudioBuffer<float> playbackBuffer;
+    float volume = 1.0f;
     // B. Embedded Javascript engine (from choc)
     
 

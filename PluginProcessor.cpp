@@ -31,8 +31,8 @@ EffectsPluginProcessor::EffectsPluginProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
-      // A. This is unique for our project
-      
+// A. This is unique for our project
+
 {
 }
 
@@ -70,44 +70,45 @@ public:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>CHOC WebView</title>
+        <title>Looper Interface</title>
     </head>
     <body>
-        <h1>Welcome to CHOC WebView</h1>
-        <p>This is a static HTML content loaded directly into the WebView.</p>
+        <h1>Looper Interface</h1>
         
-        <!-- Volume Slider -->
+        <!-- Record/Play Buttons -->
+        <button id="record">Record</button>
+        <button id="play">Play</button>
+        
+        <!-- Volume Control -->
         <label for="volume">Volume:</label>
         <input type="range" id="volume" name="volume" min="0" max="1" step="0.01" value="0.5">
         
         <script>
-            // Function to handle volume changes
+            document.getElementById('record').addEventListener('click', function() {
+                if (typeof onRecord === 'function') {
+                    onRecord()
+                        .catch(err => console.error('Error invoking onRecord:', err));
+                }
+            });
+
+            document.getElementById('play').addEventListener('click', function() {
+                if (typeof onPlay === 'function') {
+                    onPlay()
+                        .catch(err => console.error('Error invoking onPlay:', err));
+                }
+            });
+
             document.getElementById('volume').addEventListener('input', function(event) {
                 const volume = event.target.value;
-                
                 if (typeof onVolumeChange === 'function') {
-                    try {
-                        onVolumeChange([volume])
-                            .then(() => console.log('Volume change handled'))
-                            .catch(err => console.error('Error in onVolumeChange:', err));
-                    } catch (err) {
-                        console.error('Error invoking onVolumeChange:', err);
-                    }
-                }
-
-                if (typeof sendMessageToNative === 'function') {
-                    try {
-                        sendMessageToNative(JSON.stringify({ type: 'volumeChange', volume: volume }))
-                            .catch(err => console.error('Error sending message to native:', err));
-                    } catch (err) {
-                        console.error('Error in sendMessageToNative:', err);
-                    }
+                    onVolumeChange([volume])
+                        .catch(err => console.error('Error in onVolumeChange:', err));
                 }
             });
         </script>
     </body>
     </html>
-)";
+    )";
 
         // Load the HTML content into the WebView
         chocWebView->setHTML(std::string(htmlContent));
@@ -131,33 +132,22 @@ public:
 
     void initializeWebViewBindings()
     {
-        chocWebView->bind("onVolumeChange", [this](const choc::value::ValueView &args) -> choc::value::Value
+
+        chocWebView->bind("onRecord", [this](const choc::value::ValueView &) -> choc::value::Value
                           {
-                            //Create JUCE message window
-                            
-
-        if (args.isArray() && args.size() > 0 && args[0].isString())
-        {
-            std::string volumeStr = args[0].getString().data();
-            float volume = std::stof(volumeStr);
-            
-            // Prepare a JSON string to pass to handleWebViewMessage
-            std::string jsonMessage = "{\"type\":\"volumeChange\", \"volume\":" + std::to_string(volume) + "}";
-            auto expr = juce::String().toStdString();
-
-            // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
-            // here on the main thread
-            //processorRef.evalJsContext("volUp();");
-            processorRef.handleWebViewMessage(jsonMessage);
-        }
+        processorRef.startRecording();
         return choc::value::Value(); });
 
-        chocWebView->bind("sendMessageToNative", [this](const choc::value::ValueView &args) -> choc::value::Value
+        chocWebView->bind("onPlay", [this](const choc::value::ValueView &) -> choc::value::Value
                           {
-        if (args.isArray() && args.size() > 0 && args[0].isString())
-        {
-            std::string message = args[0].getString().data();
-            processorRef.sendMessageToWebView(message);
+        processorRef.startPlayback();
+        return choc::value::Value(); });
+
+        chocWebView->bind("onVolumeChange", [this](const choc::value::ValueView &args) -> choc::value::Value
+                          {
+        if (args.isArray() && args.size() > 0 && args[0].isFloat()) {
+            float volume = args[0].getFloat32();
+            processorRef.setVolume(volume);
         }
         return choc::value::Value(); });
     }
@@ -171,7 +161,46 @@ private:
 };
 AudioPluginAudioProcessorEditor *globvar;
 choc::javascript::Context *jsRefContext;
+void EffectsPluginProcessor::startRecording() {
+    isRecording = true;
+    recordedBuffer.setSize(getTotalNumInputChannels(), getSampleRate() * 60); // Example: 1 minute buffer
+    recordedBuffer.clear();
+}
 
+
+void EffectsPluginProcessor::stopRecording() {
+    isRecording = false;
+    playbackBuffer.setSize(recordedBuffer.getNumChannels(), recordedBuffer.getNumSamples());
+    playbackBuffer.copyFrom(0, 0, recordedBuffer, 0, 0, recordedBuffer.getNumSamples());
+}
+
+void EffectsPluginProcessor::startPlayback() {
+    isPlaying = true;
+}
+
+void EffectsPluginProcessor::stopPlayback()
+{
+    isPlaying = false;
+}
+
+void EffectsPluginProcessor::setVolume(float newVolume)
+{
+    volume = newVolume;
+}
+
+void EffectsPluginProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    if (isRecording)
+    {
+        buffer.copyFrom(0, 0, recordedBuffer, 0, 0, buffer.getNumSamples());
+    }
+
+    if (isPlaying)
+    {
+        buffer.applyGain(volume);
+        buffer.addFrom(0, 0, playbackBuffer, 0, 0, buffer.getNumSamples());
+    }
+}
 //==============================================================================
 // B. This is how you make the UIX.
 //    This generic editor is what JUICe provides.
@@ -220,8 +249,8 @@ void EffectsPluginProcessor::handleWebViewMessage(const std::string &message)
 void EffectsPluginProcessor::sendMessageToWebView(const std::string &message)
 {
     globvar->chocWebView->evaluateJavascript("window.receiveMessageFromNative(" + message + ");");
-    //auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
-    
+    // auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
+
     jsRefContext->run(juce::String("volUp();").toStdString());
     jsContext.evaluateExpression(juce::String("currentVolume += 0.1;").toStdString());
     jsRefContext->invoke("volUp");
@@ -292,7 +321,7 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
     // F. If a user changes tehir sample rate, we want to re-run our JavaScript
     // Install some native interop functions in our JavaScript environment
-    
+
     jsContext.registerFunction("__getSampleRate__", [this](choc::javascript::ArgumentList args)
                                { return choc::value::Value(getSampleRate()); });
 
@@ -308,7 +337,7 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
         }
 
         return choc::value::Value(); });
-    //jsContext.invoke("testVol");
+    // jsContext.invoke("testVol");
 
     // G.
     // A simple shim to write various console operations to our native __log__ handler
@@ -328,18 +357,15 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
     };
   }
 })();
-    )shim");    
+    )shim");
 
     // Load JS File
     // Load and evaluate our Elementary js main file
     auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
     jsContext.run(dspEntryFile.loadFileAsString().toStdString());
-    
-    
-    
 
     // Now that the environment is set up, push our current state
-    
+
     dispatchStateChange();
 }
 
@@ -355,23 +381,23 @@ bool EffectsPluginProcessor::isBusesLayoutSupported(const AudioProcessor::BusesL
 }
 
 // H. Forward the info into the Elementary Runtime and ask it to do its processing.
-void EffectsPluginProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer & /* midiMessages */)
-{
-    if (runtime == nullptr)
-        return;
+// void EffectsPluginProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer & /* midiMessages */)
+// {
+//     if (runtime == nullptr)
+//         return;
 
-    // Copy the input so that our input and output buffers are distinct
-    scratchBuffer.makeCopyOf(buffer, true);
+//     // Copy the input so that our input and output buffers are distinct
+//     scratchBuffer.makeCopyOf(buffer, true);
 
-    // Process the elementary runtime
-    runtime->process(
-        const_cast<const float **>(scratchBuffer.getArrayOfWritePointers()),
-        getTotalNumInputChannels(),
-        const_cast<float **>(buffer.getArrayOfWritePointers()),
-        buffer.getNumChannels(),
-        buffer.getNumSamples(),
-        nullptr);
-}
+//     // Process the elementary runtime
+//     runtime->process(
+//         const_cast<const float **>(scratchBuffer.getArrayOfWritePointers()),
+//         getTotalNumInputChannels(),
+//         const_cast<float **>(buffer.getArrayOfWritePointers()),
+//         buffer.getNumChannels(),
+//         buffer.getNumSamples(),
+//         nullptr);
+// }
 
 // I. Lock-free way of alerting the main thread we have new params and we may need to compute.
 void EffectsPluginProcessor::parameterValueChanged(int parameterIndex, float newValue)
@@ -440,7 +466,6 @@ void EffectsPluginProcessor::dispatchStateChange()
     // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
     // here on the main thread
     jsContext.evaluateExpression(expr);
-    
 }
 
 //==============================================================================
