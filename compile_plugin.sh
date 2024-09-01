@@ -19,29 +19,23 @@ DIR_JS="$CWD/js/";
 
 : 'Javascript –––––––––––––––––––––––––––––––––––––––––'
 
-cd $DIR_JS || exit;
+cd $DIR_JS;
 # Install any JS dependencies using Node Package Manager
 npm i;
 # Build the main Javascript and store it in /js/build
 npm run build;
 
 : 'XCode -----–––––––––––––––––––––––––––––––––––––––––'
-cd $DIR_PLUGIN || exit;
-
-# Build for an Intell-based Mac
-cmake -G Xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_OSX_ARCHITECTURES=x86_64 ../
-
-# Build for an Apple Silicon-based Mac
-#cmake -G Xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_OSX_ARCHITECTURES=arm64 ../
-
-
+cd $DIR_PLUGIN;
+# Build the main audio plugin and store it in /build/
+cmake -G Xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 ../
 cmake --build .
 
 
 : 'Copy Files --–––––––––––––––––––––––––––––––––––––––––'
 # Copy the Plugins to macOS plugin directory
-cp ./build/FXP_artefacts/Debug/AU/FXP.component $HOME/Library/Audio/Plug-Ins/Components/
-cp ./build/FXP_artefacts/Debug/VST3/FXP.vst3 $HOME/Library/Audio/Plug-Ins/VST3/
+cp $DIR_PLUGIN/FXP_artefacts/Debug/AU/FXP.component $HOME/Library/Audio/Plug-Ins/Components/
+cp $DIR_PLUGIN/FXP_artefacts/Debug/VST3/FXP.vst3 $HOME/Library/Audio/Plug-Ins/VST3/
 
 # Open the Folder where the plugins should be installed
 open $HOME/Library/Audio/Plug-Ins/
