@@ -131,7 +131,7 @@ bower_components
 build/Release
 build/build
 build/juce
-
+build/
 # Dependency directories
 node_modules/
 jspm_packages/
