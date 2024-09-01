@@ -4,8 +4,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <choc_javascript.h>
-#include <Runtime.h>
-
+#include "elem/Runtime.h"
+#include "TimerManager.h"
 
 //==============================================================================
 class EffectsPluginProcessor
@@ -17,6 +17,10 @@ public:
     //==============================================================================
     EffectsPluginProcessor();
     ~EffectsPluginProcessor() override;
+        std::atomic_bool exitFlag;
+    std::vector<std::atomic_bool*> cancelTokens; // Store all cancel tokens
+
+    TimerManager timerManager;
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;

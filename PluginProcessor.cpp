@@ -31,8 +31,8 @@ EffectsPluginProcessor::EffectsPluginProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
-      // A. This is unique for our project
-      
+// A. This is unique for our project
+
 {
 }
 
@@ -78,7 +78,7 @@ public:
         
         <!-- Volume Slider -->
         <label for="volume">Volume:</label>
-        <input type="range" id="volume" name="volume" min="0" max="1" step="0.01" value="0.5">
+        <input type="range" id="volume" name="volume" min="0" max="100000" step="200" value="0.5">
         
         <script>
             // Function to handle volume changes
@@ -147,7 +147,7 @@ public:
 
             // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
             // here on the main thread
-            //processorRef.evalJsContext("volUp();");
+            processorRef.evalJsContext("{\"setCutoffFreq({\"value\":" + std::to_string(volume) + "})");
             processorRef.handleWebViewMessage(jsonMessage);
         }
         return choc::value::Value(); });
@@ -160,6 +160,11 @@ public:
             processorRef.sendMessageToWebView(message);
         }
         return choc::value::Value(); });
+        std::atomic_bool *cancelToken1 = new std::atomic_bool(true);
+        processorRef.cancelTokens.push_back(cancelToken1);
+        auto test = [this]()
+        { this->chocWebView->evaluateJavascript("console.log('opa interval')"); };
+        //processorRef.timerManager.setInterval(test, 2000, *cancelToken1);
     }
 
 private:
@@ -186,11 +191,8 @@ juce::AudioProcessorEditor *EffectsPluginProcessor::createEditor()
 }
 void EffectsPluginProcessor::evalJsContext(const std::string &expr)
 {
-    jsContext.evaluateExpression("(function() {globalThis.volUp();})();");
     jsRefContext->evaluateExpression(juce::String(expr).toStdString());
-    jsContext.evaluateExpression(juce::String("currentVolume += 0.1;").toStdString());
-    jsRefContext->invoke("volUp");
-    jsRefContext->invoke("volUp()");
+    jsContext.evaluateExpression(juce::String(expr).toStdString());
 }
 
 void EffectsPluginProcessor::handleWebViewMessage(const std::string &message)
@@ -220,8 +222,8 @@ void EffectsPluginProcessor::handleWebViewMessage(const std::string &message)
 void EffectsPluginProcessor::sendMessageToWebView(const std::string &message)
 {
     globvar->chocWebView->evaluateJavascript("window.receiveMessageFromNative(" + message + ");");
-    //auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
-    
+    // auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
+
     jsRefContext->run(juce::String("volUp();").toStdString());
     jsContext.evaluateExpression(juce::String("currentVolume += 0.1;").toStdString());
     jsRefContext->invoke("volUp");
@@ -282,9 +284,16 @@ void EffectsPluginProcessor::changeProgramName(int /* index */, const juce::Stri
 // D. HOST knows what it needs ot know.
 //    We know the sample rate, the block size for every callback.
 //    This is the moment before we render audio
-
+std::vector<std::string> delayedMessages;
+void push_to_delayed(std::string message)
+{
+    delayedMessages.push_back("console.log('from jsContext:" + std::string(message) + "');");
+}
 void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
+    std::atomic_bool exitFlag;
+    std::atomic_bool cancelToken;
+
     // E. Make the Elementary Runtime
     runtime = std::make_unique<elem::Runtime<float>>(sampleRate, samplesPerBlock);
     jsContext = choc::javascript::createQuickJSContext();
@@ -292,7 +301,7 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
     // F. If a user changes tehir sample rate, we want to re-run our JavaScript
     // Install some native interop functions in our JavaScript environment
-    
+
     jsContext.registerFunction("__getSampleRate__", [this](choc::javascript::ArgumentList args)
                                { return choc::value::Value(getSampleRate()); });
 
@@ -304,11 +313,58 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
     jsContext.registerFunction("__log__", [this](choc::javascript::ArgumentList args)
                                {
         for (size_t i = 0; i < args.numArgs; ++i) {
-            DBG(choc::json::toString(*args[i], true));
+            //DBG(choc::json::toString(*args[i], true));
+            //this->handleWebViewMessage(choc::json::toString(*args[i], true));
+            //this->handleWebViewMessage("console.log('wow');");
         }
+        
+        //this->handleWebViewMessage("ooooo");
+        if(globvar != nullptr)
+        {   if (!delayedMessages.empty()) {
+            for (const auto& message : delayedMessages) {
+                globvar->chocWebView->evaluateJavascript(message);
+            }
+            // Clear the delayed messages after processing
+            delayedMessages.clear();
+        }
+            globvar->chocWebView->evaluateJavascript("console.log('from jsContext LOG:"+std::string(args[1]->toString())+"');");// + std::string(args[1]->toString()) + "');");
+        }
+        else{
+            delayedMessages.push_back("console.log('from jsContext LOG:" + std::string(args[1]->toString()) + "');");
+        }
+    
 
         return choc::value::Value(); });
-    //jsContext.invoke("testVol");
+    jsContext.registerFunction("setInterval", [this](choc::javascript::ArgumentList args)
+                               {
+            if (args.numArgs < 2) {
+                return choc::value::Value();
+            }
+
+            for (size_t i = 0; i < args.numArgs; ++i) {
+                std::cout << "Type: " << args[i]->getType().getDescription() << ", Value: " << choc::json::toString(*args[i], true) << std::endl;
+            }
+            std::string funcName = args[0]->toString();
+            std::atomic_bool* cancelToken = new std::atomic_bool(true);
+            auto func = [this, cancelToken, funcName]() { 
+                std::string formattedString = funcName + "();";
+                std::cout << "Executing JS function: " << formattedString << std::endl;
+                push_to_delayed("tried Executing JS function in interval:"+funcName);
+                this->jsContext.run(formattedString); 
+            };
+            this->timerManager.setInterval(func, args[1]->getFloat64(), std::ref(*cancelToken));
+
+            return choc::value::Value(reinterpret_cast<int64_t>(cancelToken)); });
+    std::atomic_bool *cancelToken3 = new std::atomic_bool(true);
+    auto test = [this]()
+    {
+        if(globvar!= nullptr)
+        {
+            globvar->chocWebView->evaluateJavascript("console.log('from jsContext:');");
+            this->jsContext.run("fact();");
+        } };
+    //this->timerManager.setInterval(test, 3000, std::ref(*cancelToken3));
+    // jsContext.invoke("testVol");
 
     // G.
     // A simple shim to write various console operations to our native __log__ handler
@@ -328,18 +384,15 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
     };
   }
 })();
-    )shim");    
+    )shim");
 
     // Load JS File
     // Load and evaluate our Elementary js main file
     auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
     jsContext.run(dspEntryFile.loadFileAsString().toStdString());
-    
-    
-    
 
     // Now that the environment is set up, push our current state
-    
+
     dispatchStateChange();
 }
 
@@ -440,7 +493,6 @@ void EffectsPluginProcessor::dispatchStateChange()
     // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
     // here on the main thread
     jsContext.evaluateExpression(expr);
-    
 }
 
 //==============================================================================
