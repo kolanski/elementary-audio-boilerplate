@@ -1,55 +1,23 @@
 import {Renderer, el} from '@elemaudio/core';
-console.log("");
 
-// Initialize a volume variable with the default value
-let currentVolume = 1.0;
 
-// Create a handler for the Proxy to watch for changes
-const volumeHandler = {
-    set(target, property, value) {
-        target[property] = value;
-        return true;
-    }
-};
-
-// Create a Proxy for currentVolume
-let volumeProxy = new Proxy({ value: currentVolume }, volumeHandler);
-
-// Create the Renderer instance
+// This example is the "Hello, world!" of writing audio processes in Elementary, and is
+// intended to be run by the simple cli tool provided in the repository.
+//
+// Because we know that our cli will open the audio device with a sample rate of 44.1kHz,
+// we can simply create a generic Renderer straight away and ask it to render our basic
+// example.
+//
+// The signal we're generating here is a simple sine tone via `el.cycle` at 440Hz in the left
+// channel and 441Hz in the right, creating some interesting binaural beating. Each sine tone is
+// then multiplied by 0.3 to apply some simple gain before going to the output. That's it!
 let core = new Renderer(__getSampleRate__(), (batch) => {
-    __postNativeMessage__(JSON.stringify(batch));
+  __postNativeMessage__(JSON.stringify(batch));
 });
 
-// Variable to store the previous rendering nodes
-let previousNodes = null;
+let stats = core.render(
+  el.mul(0.3, el.cycle(440)),
+  el.mul(0.3, el.cycle(441)),
+);
 
-// Asynchronous function to render audio with the current volume
-async function renderAudioLoop() {
-    while (volumeProxy.value > 0) {
-        // Stop the previous rendering nodes if they exist
-        if (previousNodes) {
-            previousNodes.forEach(node => node.stop());
-        }
-
-        // Render the new audio
-        let nodes = [
-            el.mul(volumeProxy.value, el.cycle(440)),
-            el.mul(volumeProxy.value, el.cycle(441))
-        ];
-        let stats = core.render(...nodes);
-
-        // Store the current nodes as previous nodes for the next render
-        previousNodes = nodes;
-
-        console.log(stats);
-
-        // Decrease the volume
-        volumeProxy.value = Math.max(0, volumeProxy.value - 0.1);
-
-        // Non-blocking delay for 1 second
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-}
-
-// Start the asynchronous rendering loop
-renderAudioLoop();
+console.log(stats);
