@@ -4,7 +4,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <choc_javascript.h>
-#include "elem/Runtime.h"
+#include <Runtime.h>
 
 
 //==============================================================================
@@ -20,6 +20,10 @@ public:
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
+    void handleWebViewMessage(const std::string &message);
+    choc::javascript::Context jsContext;
+    void sendMessageToWebView(const std::string &message);
+    void evalJsContext(const std::string &expr);
     bool hasEditor() const override;
 
     //==============================================================================
@@ -69,7 +73,7 @@ private:
     // Ableton line wants to know
     elem::js::Object state;
     // B. Embedded Javascript engine (from choc)
-    choc::javascript::Context jsContext;
+    
 
     juce::AudioBuffer<float> scratchBuffer;
 
