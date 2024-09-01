@@ -26,7 +26,38 @@ juce::File getAssetsDirectory()
 }
 
 //==============================================================================
+class TaskQueue {
+public:
+    void postTask(std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(mutex);
+        tasks.push(task);
+        condition.notify_one();
+    }
 
+    void processTasks() {
+        std::queue<std::function<void()>> tasksToProcess;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            std::swap(tasks, tasksToProcess);
+        }
+
+        while (!tasksToProcess.empty()) {
+            tasksToProcess.front()();
+            tasksToProcess.pop();
+        }
+    }
+
+    void waitForTasks() {
+        std::unique_lock<std::mutex> lock(mutex);
+        condition.wait(lock, [this] { return !tasks.empty(); });
+    }
+
+private:
+    std::queue<std::function<void()>> tasks;
+    std::mutex mutex;
+    std::condition_variable condition;
+};
+inline TaskQueue taskQueue;
 EffectsPluginProcessor::EffectsPluginProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -43,6 +74,8 @@ EffectsPluginProcessor::~EffectsPluginProcessor()
         p->removeListener(this);
     }
 }
+std::vector<std::string> delayedMessages;
+choc::javascript::Context *jsRefContext;
 
 class AudioPluginAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -78,7 +111,7 @@ public:
         
         <!-- Volume Slider -->
         <label for="volume">Volume:</label>
-        <input type="range" id="volume" name="volume" min="0" max="100000" step="200" value="0.5">
+        <input type="range" id="volume" name="volume" min="0" max="1" step="0.01" value="0.01">
         
         <script>
             // Function to handle volume changes
@@ -87,8 +120,8 @@ public:
                 
                 if (typeof onVolumeChange === 'function') {
                     try {
-                        onVolumeChange([volume])
-                            .then(() => console.log('Volume change handled'))
+                        onVolumeChange(volume)
+                            .then(() => {console.log('Volume change handled');})
                             .catch(err => console.error('Error in onVolumeChange:', err));
                     } catch (err) {
                         console.error('Error invoking onVolumeChange:', err);
@@ -135,25 +168,30 @@ public:
                           {
                             //Create JUCE message window
                             
+                            
 
-        if (args.isArray() && args.size() > 0 && args[0].isString())
+        if (args.size() > 0)
         {
             std::string volumeStr = args[0].getString().data();
             float volume = std::stof(volumeStr);
-            
+            chocWebView->evaluateJavascript("console.log('current volume value:"+volumeStr+"');");
+            chocWebView->evaluateJavascript("console.log('update_volume("+volumeStr+"');");
+            jsRefContext->invoke("updateVolume");
+            taskQueue.postTask([this,volumeStr]() {
+                processorRef.jsContext.run("update_volume("+volumeStr+");");
+        });
             // Prepare a JSON string to pass to handleWebViewMessage
-            std::string jsonMessage = "{\"type\":\"volumeChange\", \"volume\":" + std::to_string(volume) + "}";
-            auto expr = juce::String().toStdString();
+            
 
             // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
             // here on the main thread
-            processorRef.evalJsContext("{\"setCutoffFreq({\"value\":" + std::to_string(volume) + "})");
-            processorRef.handleWebViewMessage(jsonMessage);
+           
         }
         return choc::value::Value(); });
 
         chocWebView->bind("sendMessageToNative", [this](const choc::value::ValueView &args) -> choc::value::Value
                           {
+                            
         if (args.isArray() && args.size() > 0 && args[0].isString())
         {
             std::string message = args[0].getString().data();
@@ -175,7 +213,6 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessorEditor)
 };
 AudioPluginAudioProcessorEditor *globvar;
-choc::javascript::Context *jsRefContext;
 
 //==============================================================================
 // B. This is how you make the UIX.
@@ -223,12 +260,14 @@ void EffectsPluginProcessor::sendMessageToWebView(const std::string &message)
 {
     globvar->chocWebView->evaluateJavascript("window.receiveMessageFromNative(" + message + ");");
     // auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
+     
 
-    jsRefContext->run(juce::String("volUp();").toStdString());
-    jsContext.evaluateExpression(juce::String("currentVolume += 0.1;").toStdString());
-    jsRefContext->invoke("volUp");
-    jsRefContext->invoke("volUp()");
-    evalJsContext("volumeProxy.value = 1;");
+
+    // jsRefContext->run(juce::String("volUp();").toStdString());
+    // jsContext.evaluateExpression(juce::String("currentVolume += 0.1;").toStdString());
+    // jsRefContext->invoke("volUp");
+    // jsRefContext->invoke("volUp()");
+    // evalJsContext("volumeProxy.value = 1;");
 }
 
 bool EffectsPluginProcessor::hasEditor() const
@@ -284,15 +323,27 @@ void EffectsPluginProcessor::changeProgramName(int /* index */, const juce::Stri
 // D. HOST knows what it needs ot know.
 //    We know the sample rate, the block size for every callback.
 //    This is the moment before we render audio
-std::vector<std::string> delayedMessages;
 void push_to_delayed(std::string message)
 {
     delayedMessages.push_back("console.log('from jsContext:" + std::string(message) + "');");
+}
+void jsExecute()
+{
+    jsRefContext->run("fact();");
 }
 void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     std::atomic_bool exitFlag;
     std::atomic_bool cancelToken;
+    auto processTasks = [this]() {
+        while (true) {
+            taskQueue.waitForTasks();
+            taskQueue.processTasks();
+        }
+    };
+
+    std::thread taskProcessor(processTasks);
+    taskProcessor.detach();
 
     // E. Make the Elementary Runtime
     runtime = std::make_unique<elem::Runtime<float>>(sampleRate, samplesPerBlock);
@@ -301,7 +352,7 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
     // F. If a user changes tehir sample rate, we want to re-run our JavaScript
     // Install some native interop functions in our JavaScript environment
-
+    
     jsContext.registerFunction("__getSampleRate__", [this](choc::javascript::ArgumentList args)
                                { return choc::value::Value(getSampleRate()); });
 
@@ -348,22 +399,28 @@ void EffectsPluginProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
             std::atomic_bool* cancelToken = new std::atomic_bool(true);
             auto func = [this, cancelToken, funcName]() { 
                 std::string formattedString = funcName + "();";
-                std::cout << "Executing JS function: " << formattedString << std::endl;
-                push_to_delayed("tried Executing JS function in interval:"+funcName);
+                //std::cout << "Executing JS function: " << formattedString << std::endl;
+                //push_to_delayed("tried Executing JS function in interval:"+funcName);
                 this->jsContext.run(formattedString); 
             };
             this->timerManager.setInterval(func, args[1]->getFloat64(), std::ref(*cancelToken));
 
             return choc::value::Value(reinterpret_cast<int64_t>(cancelToken)); });
     std::atomic_bool *cancelToken3 = new std::atomic_bool(true);
-    auto test = [this]()
+    auto test = [this, &cancelToken3]()
     {
         if(globvar!= nullptr)
         {
-            globvar->chocWebView->evaluateJavascript("console.log('from jsContext:');");
-            this->jsContext.run("fact();");
-        } };
-    //this->timerManager.setInterval(test, 3000, std::ref(*cancelToken3));
+            globvar->chocWebView->evaluateJavascript("console.log('try instance bind');");
+            this->jsContext.run("globalThis.fact();");
+            auto& biig = this->jsContext;
+                        
+    
+        return choc::value::Value(); };
+            
+            //cancelToken3->store(false);
+        };
+    this->timerManager.setInterval(test, 3000, *cancelToken3);
     // jsContext.invoke("testVol");
 
     // G.
