@@ -200,7 +200,7 @@ void EffectsPluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     // G.
     // A simple shim to write various console operations to our native __log__ handler
-    jsContext.evaluate(R"shim(
+    jsContext.evaluateExpression(R"shim(
 (function() {
   if (typeof globalThis.console === 'undefined') {
     globalThis.console = {
@@ -221,7 +221,7 @@ void EffectsPluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // Load JS File
     // Load and evaluate our Elementary js main file
     auto dspEntryFile = getAssetsDirectory().getChildFile("main.js");
-    jsContext.evaluate(dspEntryFile.loadFileAsString().toStdString());
+    jsContext.evaluateExpression(dspEntryFile.loadFileAsString().toStdString());
 
     // Now that the environment is set up, push our current state
     dispatchStateChange();
@@ -323,7 +323,7 @@ void EffectsPluginProcessor::dispatchStateChange()
 
     // Next we dispatch to the local engine which will evaluate any necessary JavaScript synchronously
     // here on the main thread
-    jsContext.evaluate(expr);
+    jsContext.evaluateExpression(expr);
 }
 
 //==============================================================================
