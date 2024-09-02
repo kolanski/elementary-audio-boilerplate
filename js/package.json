@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist && mkdir -p dist && touch dist/.keep",
     "copy": "cp manifest.json dist/",
     "prebuild": "npm run clean",
     "build": "esbuild *.js --bundle --outdir=dist",
