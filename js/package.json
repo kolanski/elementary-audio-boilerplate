@@ -9,8 +9,6 @@
   },
   "dependencies": {
     "@elemaudio/core": "^3.2.1",
-    "@elemaudio/offline-renderer": "^3.2.2",
-    "esbuild": "^0.17.8",
-    "speaker": "^0.5.5"
+    "esbuild": "^0.17.8"
   }
 }
